@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Factory Dashboard - Product Validation Engine</title>
+    <meta name="description" content="Monitor autonomous product validation pipeline - pain points, products, performance, and scaling decisions.">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': '#3b82f6',
+                        'success': '#10b981',
+                        'warning': '#f59e0b',
+                        'danger': '#ef4444',
+                        'dark-bg': '#0a0a0a',
+                        'dark-card': '#1a1a1a',
+                        'dark-border': '#2a2a2a'
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'bounce-slow': 'bounce 2s infinite'
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: #0a0a0a;
+        }
+        
+        .gradient-border {
+            background: linear-gradient(90deg, #3b82f6, #10b981, #f59e0b, #ef4444);
+            background-size: 400% 100%;
+            animation: gradient-shift 8s ease infinite;
+        }
+        
+        @keyframes gradient-shift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        
+        .status-testing {
+            background-color: rgba(251, 191, 36, 0.1);
+            color: #fbbf24;
+            border: 1px solid rgba(251, 191, 36, 0.2);
+        }
+        
+        .status-winner {
+            background-color: rgba(16, 185, 129, 0.1);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+        
+        .status-killed {
+            background-color: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+        
+        .metric-card {
+            background: linear-gradient(145deg, #1a1a1a 0%, #0f0f0f 100%);
+            border: 1px solid #2a2a2a;
+            transition: all 0.3s ease;
+        }
+        
+        .metric-card:hover {
+            border-color: #3b82f6;
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.1);
+        }
+        
+        .data-table {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+        }
+        
+        .data-row {
+            border-bottom: 1px solid #2a2a2a;
+            transition: background-color 0.2s ease;
+        }
+        
+        .data-row:hover {
+            background-color: rgba(59, 130, 246, 0.05);
+        }
+        
+        .refresh-indicator {
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        .pain-score {
+            background: linear-gradient(90deg, #ef4444, #f59e0b, #10b981);
+            background-size: 100% 4px;
+            background-repeat: no-repeat;
+            background-position: bottom;
+        }
+        
+        .trend-up { color: #10b981; }
+        .trend-down { color: #ef4444; }
+        .trend-flat { color: #6b7280; }
+        
+        .live-indicator {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+</head>
+
+<body class="bg-dark-bg text-white min-h-screen">
+    <!-- Header -->
+    <header class="bg-dark-card border-b border-dark-border sticky top-0 z-40 backdrop-blur-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center space-x-4">
+                    <div class="gradient-border p-[1px] rounded-lg">
+                        <div class="bg-dark-card px-3 py-1 rounded-lg">
+                            <h1 class="text-xl font-bold">🏭 Factory Dashboard</h1>
+                        </div>
+                    </div>
+                    <div class="hidden md:flex items-center space-x-2 text-sm text-gray-400">
+                        <span class="live-indicator w-2 h-2 bg-success rounded-full"></span>
+                        <span>Live Monitoring</span>
+                    </div>
+                </div>
+                
+                <div class="flex items-center space-x-4">
+                    <div class="text-sm text-gray-400">
+                        Last updated: <span id="last-updated" class="text-white">--:--</span>
+                    </div>
+                    <button id="refresh-btn" class="text-gray-400 hover:text-white transition-colors">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                    </button>
+                    <div class="text-sm">
+                        <span class="text-gray-400">Auto-refresh:</span>
+                        <span id="countdown" class="text-primary font-mono">60s</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        <!-- Live Campaigns Section -->
+        <section class="mb-8">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold">🎯 Live Reddit Campaigns</h2>
+                <div class="flex items-center space-x-4">
+                    <div class="text-sm text-gray-400">
+                        <span class="live-indicator w-2 h-2 bg-success rounded-full inline-block mr-2"></span>
+                        <span id="campaigns-last-updated">Last updated: --:--</span>
+                    </div>
+                    <button id="refresh-campaigns" class="text-gray-400 hover:text-white transition-colors" onclick="refreshCampaigns()">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Campaign Summary Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                <div class="metric-card p-4 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-gray-400 text-xs font-medium">Active Campaigns</p>
+                            <p class="text-xl font-bold text-success" id="active-campaigns">0</p>
+                        </div>
+                        <div class="text-2xl">🟢</div>
+                    </div>
+                </div>
+                
+                <div class="metric-card p-4 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-gray-400 text-xs font-medium">Paused Campaigns</p>
+                            <p class="text-xl font-bold text-warning" id="paused-campaigns">0</p>
+                        </div>
+                        <div class="text-2xl">⏸️</div>
+                    </div>
+                </div>
+                
+                <div class="metric-card p-4 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-gray-400 text-xs font-medium">Daily Budget</p>
+                            <p class="text-xl font-bold text-primary" id="total-daily-budget">$0</p>
+                        </div>
+                        <div class="text-2xl">💰</div>
+                    </div>
+                </div>
+                
+                <div class="metric-card p-4 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-gray-400 text-xs font-medium">Issues</p>
+                            <p class="text-xl font-bold text-danger" id="campaign-issues">0</p>
+                        </div>
+                        <div class="text-2xl">⚠️</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Campaign Cards Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="campaigns-grid">
+                <!-- Campaign cards will be populated here -->
+            </div>
+            
+            <!-- Issues/Warnings Section -->
+            <div id="campaigns-alerts" class="mt-6 hidden">
+                <h3 class="text-lg font-bold mb-4 text-warning">⚠️ Campaign Alerts</h3>
+                <div id="alerts-container" class="space-y-2">
+                    <!-- Alerts will be populated here -->
+                </div>
+            </div>
+        </section>
+        
+        <!-- Summary Stats -->
+        <section class="mb-8">
+            <h2 class="text-2xl font-bold mb-6">Pipeline Overview</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                
+                <!-- Total Ideas Tested -->
+                <div class="metric-card p-6 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-gray-400 text-sm font-medium">Ideas Tested</p>
+                            <p class="text-2xl font-bold" id="total-tested">0</p>
+                            <p class="text-xs text-gray-500 mt-1">
+                                <span class="trend-up">↗ +12 today</span>
+                            </p>
+                        </div>
+                        <div class="text-3xl">🧪</div>
+                    </div>
+                </div>
+                
+                <!-- Live Products -->
+                <div class="metric-card p-6 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-gray-400 text-sm font-medium">Live Products</p>
+                            <p class="text-2xl font-bold text-success" id="live-products">0</p>
+                            <p class="text-xs text-gray-500 mt-1">
+                                <span class="trend-up">↗ +3 winners</span>
+                            </p>
+                        </div>
+                        <div class="text-3xl">🚀</div>
+                    </div>
+                </div>
+                
+                <!-- Total Revenue -->
+                <div class="metric-card p-6 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-gray-400 text-sm font-medium">Total Revenue</p>
+                            <p class="text-2xl font-bold text-primary" id="total-revenue">$0</p>
+                            <p class="text-xs text-gray-500 mt-1">
+                                <span class="trend-up">↗ +$1,240 today</span>
+                            </p>
+                        </div>
+                        <div class="text-3xl">💰</div>
+                    </div>
+                </div>
+                
+                <!-- Best Converter -->
+                <div class="metric-card p-6 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-gray-400 text-sm font-medium">Best Converter</p>
+                            <p class="text-lg font-bold text-warning" id="best-converter">Loading...</p>
+                            <p class="text-xs text-gray-500 mt-1">
+                                <span id="best-rate" class="trend-up">0% CVR</span>
+                            </p>
+                        </div>
+                        <div class="text-3xl">🏆</div>
+                    </div>
+                </div>
+                
+            </div>
+        </section>
+
+        <!-- Products Table -->
+        <section class="mb-8">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold">Product Performance</h2>
+                <div class="flex items-center space-x-4">
+                    <select id="status-filter" class="bg-dark-card border border-dark-border rounded-lg px-3 py-1 text-sm">
+                        <option value="all">All Status</option>
+                        <option value="testing">Testing</option>
+                        <option value="winner">Winners</option>
+                        <option value="killed">Killed</option>
+                    </select>
+                    <span class="text-sm text-gray-400">
+                        <span id="products-count">0</span> products
+                    </span>
+                </div>
+            </div>
+            
+            <div class="data-table rounded-lg overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-dark-border">
+                            <tr>
+                                <th class="text-left p-4 font-medium text-gray-300">Product</th>
+                                <th class="text-left p-4 font-medium text-gray-300">Status</th>
+                                <th class="text-center p-4 font-medium text-gray-300">Clicks</th>
+                                <th class="text-center p-4 font-medium text-gray-300">Conversions</th>
+                                <th class="text-center p-4 font-medium text-gray-300">CVR</th>
+                                <th class="text-center p-4 font-medium text-gray-300">Revenue</th>
+                                <th class="text-center p-4 font-medium text-gray-300">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="products-tbody">
+                            <!-- Products will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Pain Points Queue -->
+        <section>
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold">Pain Points Queue</h2>
+                <span class="text-sm text-gray-400">
+                    <span id="pain-points-count">0</span> pain points discovered
+                </span>
+            </div>
+            
+            <div class="data-table rounded-lg overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-dark-border">
+                            <tr>
+                                <th class="text-left p-4 font-medium text-gray-300">Pain Point</th>
+                                <th class="text-left p-4 font-medium text-gray-300">Source</th>
+                                <th class="text-center p-4 font-medium text-gray-300">Score</th>
+                                <th class="text-center p-4 font-medium text-gray-300">Market Size</th>
+                                <th class="text-center p-4 font-medium text-gray-300">Competition</th>
+                                <th class="text-center p-4 font-medium text-gray-300">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pain-points-tbody">
+                            <!-- Pain points will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-dark-card p-6 rounded-lg border border-dark-border">
+            <div class="flex items-center space-x-3">
+                <div class="refresh-indicator">
+                    <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                </div>
+                <span>Updating dashboard data...</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Dashboard state
+        let dashboardData = null;
+        let refreshInterval = null;
+        let countdownInterval = null;
+        let countdownSeconds = 60;
+
+        // Initialize dashboard
+        async function initDashboard() {
+            await loadData();
+            startAutoRefresh();
+        }
+
+        // Load data from results.json
+        async function loadData() {
+            try {
+                showLoading(true);
+                
+                // In production, this would fetch from a real API or static JSON file
+                // For demo purposes, we'll use mock data
+                const response = await fetchMockData();
+                dashboardData = response;
+                
+                updateUI();
+                updateLastUpdated();
+                
+            } catch (error) {
+                console.error('Failed to load data:', error);
+                showError('Failed to load dashboard data');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // Mock data function (replace with actual API call)
+        async function fetchMockData() {
+            // Simulate API delay
+            await new Promise(resolve => setTimeout(resolve, 800));
+            
+            return {
+                summary: {
+                    totalTested: 47,
+                    liveProducts: 8,
+                    totalRevenue: 15240,
+                    bestConverter: {
+                        name: "PDF Merger Pro",
+                        rate: 8.2
+                    }
+                },
+                products: [
+                    {
+                        id: 1,
+                        name: "PDF Merger Pro",
+                        url: "https://pdfmerger.pro",
+                        status: "winner",
+                        clicks: 2840,
+                        conversions: 233,
+                        conversionRate: 8.2,
+                        revenue: 4660,
+                        created: "2026-03-08"
+                    },
+                    {
+                        id: 2,
+                        name: "Code Snippet Organizer",
+                        url: "https://codesnippets.dev",
+                        status: "testing",
+                        clicks: 1520,
+                        conversions: 45,
+                        conversionRate: 2.96,
+                        revenue: 225,
+                        created: "2026-03-09"
+                    },
+                    {
+                        id: 3,
+                        name: "AI Email Writer",
+                        url: "https://ai-email-writer.com",
+                        status: "winner",
+                        clicks: 3200,
+                        conversions: 189,
+                        conversionRate: 5.9,
+                        revenue: 3780,
+                        created: "2026-03-07"
+                    },
+                    {
+                        id: 4,
+                        name: "Markdown to HTML",
+                        url: "https://md2html.tools",
+                        status: "killed",
+                        clicks: 890,
+                        conversions: 12,
+                        conversionRate: 1.35,
+                        revenue: 60,
+                        created: "2026-03-06"
+                    },
+                    {
+                        id: 5,
+                        name: "API Documentation Generator",
+                        url: "https://apidocs.gen",
+                        status: "testing",
+                        clicks: 670,
+                        conversions: 23,
+                        conversionRate: 3.43,
+                        revenue: 115,
+                        created: "2026-03-10"
+                    }
+                ],
+                painPoints: [
+                    {
+                        id: 1,
+                        description: "Developers struggle with converting TypeScript interfaces to JSON schemas",
+                        source: "Reddit r/webdev",
+                        score: 92,
+                        marketSize: "Large",
+                        competition: "Low",
+                        status: "queued"
+                    },
+                    {
+                        id: 2,
+                        description: "Small businesses need simple inventory tracking without complex ERP",
+                        source: "Twitter",
+                        score: 87,
+                        marketSize: "Medium",
+                        competition: "Medium",
+                        status: "researching"
+                    },
+                    {
+                        id: 3,
+                        description: "Freelancers want automated invoice generation from time tracking",
+                        source: "Indie Hackers",
+                        score: 83,
+                        marketSize: "Medium",
+                        competition: "High",
+                        status: "queued"
+                    },
+                    {
+                        id: 4,
+                        description: "Content creators need batch social media post scheduling",
+                        source: "YouTube comments",
+                        score: 78,
+                        marketSize: "Large",
+                        competition: "High",
+                        status: "discarded"
+                    }
+                ]
+            };
+        }
+
+        // Update UI with data
+        function updateUI() {
+            if (!dashboardData) return;
+
+            // Update summary stats
+            document.getElementById('total-tested').textContent = dashboardData.summary.totalTested;
+            document.getElementById('live-products').textContent = dashboardData.summary.liveProducts;
+            document.getElementById('total-revenue').textContent = `$${dashboardData.summary.totalRevenue.toLocaleString()}`;
+            document.getElementById('best-converter').textContent = dashboardData.summary.bestConverter.name;
+            document.getElementById('best-rate').textContent = `${dashboardData.summary.bestConverter.rate}% CVR`;
+
+            // Update products table
+            renderProductsTable();
+            
+            // Update pain points table
+            renderPainPointsTable();
+            
+            // Update counts
+            document.getElementById('products-count').textContent = dashboardData.products.length;
+            document.getElementById('pain-points-count').textContent = dashboardData.painPoints.length;
+        }
+
+        // Render products table
+        function renderProductsTable() {
+            const tbody = document.getElementById('products-tbody');
+            const filter = document.getElementById('status-filter').value;
+            
+            let filteredProducts = dashboardData.products;
+            if (filter !== 'all') {
+                filteredProducts = dashboardData.products.filter(p => p.status === filter);
+            }
+            
+            tbody.innerHTML = filteredProducts.map(product => `
+                <tr class="data-row">
+                    <td class="p-4">
+                        <div>
+                            <div class="font-medium text-white">${product.name}</div>
+                            <a href="${product.url}" target="_blank" class="text-xs text-primary hover:text-blue-300 transition-colors">
+                                ${product.url} ↗
+                            </a>
+                        </div>
+                    </td>
+                    <td class="p-4">
+                        <span class="status-${product.status} px-2 py-1 rounded-full text-xs font-medium">
+                            ${product.status.charAt(0).toUpperCase() + product.status.slice(1)}
+                        </span>
+                    </td>
+                    <td class="p-4 text-center font-medium">${product.clicks.toLocaleString()}</td>
+                    <td class="p-4 text-center font-medium">${product.conversions}</td>
+                    <td class="p-4 text-center">
+                        <span class="${product.conversionRate >= 5 ? 'text-success' : product.conversionRate >= 2 ? 'text-warning' : 'text-danger'} font-medium">
+                            ${product.conversionRate}%
+                        </span>
+                    </td>
+                    <td class="p-4 text-center font-medium text-success">$${product.revenue.toLocaleString()}</td>
+                    <td class="p-4 text-center">
+                        <div class="flex justify-center space-x-2">
+                            ${product.status === 'testing' ? `
+                                <button class="text-success hover:text-green-300 text-xs" onclick="scaleProduct(${product.id})">Scale</button>
+                                <button class="text-danger hover:text-red-300 text-xs" onclick="killProduct(${product.id})">Kill</button>
+                            ` : product.status === 'winner' ? `
+                                <button class="text-warning hover:text-yellow-300 text-xs" onclick="pauseProduct(${product.id})">Pause</button>
+                            ` : `
+                                <span class="text-gray-500 text-xs">No actions</span>
+                            `}
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // Render pain points table
+        function renderPainPointsTable() {
+            const tbody = document.getElementById('pain-points-tbody');
+            
+            tbody.innerHTML = dashboardData.painPoints.map(point => `
+                <tr class="data-row">
+                    <td class="p-4">
+                        <div class="max-w-md">
+                            <div class="text-white text-sm">${point.description}</div>
+                        </div>
+                    </td>
+                    <td class="p-4">
+                        <span class="text-gray-400 text-sm">${point.source}</span>
+                    </td>
+                    <td class="p-4 text-center">
+                        <div class="pain-score">
+                            <span class="font-bold ${point.score >= 85 ? 'text-success' : point.score >= 70 ? 'text-warning' : 'text-gray-400'}">
+                                ${point.score}
+                            </span>
+                        </div>
+                    </td>
+                    <td class="p-4 text-center">
+                        <span class="text-sm ${point.marketSize === 'Large' ? 'text-success' : point.marketSize === 'Medium' ? 'text-warning' : 'text-gray-400'}">
+                            ${point.marketSize}
+                        </span>
+                    </td>
+                    <td class="p-4 text-center">
+                        <span class="text-sm ${point.competition === 'Low' ? 'text-success' : point.competition === 'Medium' ? 'text-warning' : 'text-danger'}">
+                            ${point.competition}
+                        </span>
+                    </td>
+                    <td class="p-4 text-center">
+                        <span class="text-xs px-2 py-1 rounded-full ${
+                            point.status === 'queued' ? 'bg-blue-900 text-blue-300' :
+                            point.status === 'researching' ? 'bg-yellow-900 text-yellow-300' :
+                            'bg-gray-700 text-gray-400'
+                        }">
+                            ${point.status}
+                        </span>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // Product actions
+        function scaleProduct(id) {
+            if (confirm('Scale this product for increased ad spend?')) {
+                console.log(`Scaling product ${id}`);
+                // In real implementation, this would call an API
+            }
+        }
+
+        function killProduct(id) {
+            if (confirm('Kill this product and stop all ads?')) {
+                console.log(`Killing product ${id}`);
+                // In real implementation, this would call an API
+            }
+        }
+
+        function pauseProduct(id) {
+            if (confirm('Pause ads for this product?')) {
+                console.log(`Pausing product ${id}`);
+                // In real implementation, this would call an API
+            }
+        }
+
+        // Auto refresh functionality
+        function startAutoRefresh() {
+            // Refresh data every 60 seconds
+            refreshInterval = setInterval(() => {
+                loadData();
+                loadCampaignsData();
+            }, 60000);
+            
+            // Update countdown every second
+            countdownInterval = setInterval(() => {
+                countdownSeconds--;
+                document.getElementById('countdown').textContent = `${countdownSeconds}s`;
+                
+                if (countdownSeconds <= 0) {
+                    countdownSeconds = 60;
+                }
+            }, 1000);
+        }
+
+        // Manual refresh
+        document.getElementById('refresh-btn').addEventListener('click', () => {
+            countdownSeconds = 60;
+            loadData();
+            loadCampaignsData();
+        });
+
+        // Status filter
+        document.getElementById('status-filter').addEventListener('change', renderProductsTable);
+
+        // Utility functions
+        function updateLastUpdated() {
+            const now = new Date();
+            document.getElementById('last-updated').textContent = now.toLocaleTimeString();
+        }
+
+        function showLoading(show) {
+            const overlay = document.getElementById('loading-overlay');
+            if (show) {
+                overlay.classList.remove('hidden');
+            } else {
+                overlay.classList.add('hidden');
+            }
+        }
+
+        function showError(message) {
+            alert(`Error: ${message}`);
+        }
+
+        // Reddit Campaigns functionality
+        let campaignsData = null;
+        
+        // Demo data for Reddit campaigns
+        const demoCampaignsData = {
+            campaigns: [
+                {
+                    name: "DevForge - PDF to CSV",
+                    effective_status: "ACTIVE",
+                    goal_value: 20000000, // in centavos
+                    objective: "CLICKS",
+                    ads_count: 3,
+                    impressions: 12450,
+                    clicks: 89,
+                    spend: 1250000
+                },
+                {
+                    name: "DevForge - README Generator", 
+                    effective_status: "ACTIVE",
+                    goal_value: 15000000,
+                    objective: "IMPRESSIONS",
+                    ads_count: 2,
+                    impressions: 8920,
+                    clicks: 45,
+                    spend: 980000
+                },
+                {
+                    name: "DevForge - Architecture Diagrams",
+                    effective_status: "PAUSED",
+                    goal_value: 25000000,
+                    objective: "CLICKS", 
+                    ads_count: 4,
+                    impressions: 5200,
+                    clicks: 12,
+                    spend: 650000
+                },
+                {
+                    name: "DevForge - GDPR Compliance",
+                    effective_status: "ACTIVE",
+                    goal_value: 50000000,
+                    objective: "CONVERSIONS",
+                    ads_count: 5,
+                    impressions: 18750,
+                    clicks: 156,
+                    spend: 2100000
+                },
+                {
+                    name: "DevForge - Git Changelog",
+                    effective_status: "ACTIVE", 
+                    goal_value: 10000000,
+                    objective: "CLICKS",
+                    ads_count: 2,
+                    impressions: 6430,
+                    clicks: 34,
+                    spend: 720000
+                },
+                {
+                    name: "Test Campaign - Duplicate Budget",
+                    effective_status: "PAUSED",
+                    goal_value: 50000000,
+                    objective: "CLICKS",
+                    ads_count: 1,
+                    impressions: 1200,
+                    clicks: 3,
+                    spend: 45000
+                }
+            ],
+            summary: {
+                active: 4,
+                paused: 2, 
+                total_budget_daily: 1700,
+                issues: 2
+            }
+        };
+        
+        // Load Reddit campaigns data
+        async function loadCampaignsData() {
+            try {
+                // Try to fetch from API first
+                const response = await fetch('/.netlify/functions/reddit-ads-status');
+                if (response.ok) {
+                    campaignsData = await response.json();
+                } else {
+                    throw new Error('API not available');
+                }
+            } catch (error) {
+                console.log('Using demo data for campaigns:', error.message);
+                campaignsData = demoCampaignsData;
+            }
+            
+            updateCampaignsUI();
+            updateCampaignsTimestamp();
+        }
+        
+        // Update campaigns UI
+        function updateCampaignsUI() {
+            if (!campaignsData) return;
+            
+            // Update summary metrics
+            document.getElementById('active-campaigns').textContent = campaignsData.summary.active;
+            document.getElementById('paused-campaigns').textContent = campaignsData.summary.paused;
+            document.getElementById('total-daily-budget').textContent = `$${campaignsData.summary.total_budget_daily}`;
+            document.getElementById('campaign-issues').textContent = campaignsData.summary.issues;
+            
+            // Render campaign cards
+            renderCampaignCards();
+            
+            // Render alerts
+            renderCampaignAlerts();
+        }
+        
+        // Render individual campaign cards
+        function renderCampaignCards() {
+            const grid = document.getElementById('campaigns-grid');
+            
+            grid.innerHTML = campaignsData.campaigns.map(campaign => {
+                const budget = (campaign.goal_value / 100000000).toFixed(1); // Convert from centavos to dollars
+                const spend = campaign.spend ? (campaign.spend / 100000).toFixed(2) : '0.00';
+                const ctr = campaign.clicks && campaign.impressions ? 
+                    ((campaign.clicks / campaign.impressions) * 100).toFixed(2) : '0.00';
+                
+                const statusClass = campaign.effective_status === 'ACTIVE' ? 
+                    'bg-green-900/50 text-green-300 border-green-500/30' :
+                    'bg-yellow-900/50 text-yellow-300 border-yellow-500/30';
+                    
+                const statusIcon = campaign.effective_status === 'ACTIVE' ? '🟢' : '⏸️';
+                
+                return `
+                    <div class="metric-card p-5 rounded-lg border border-dark-border">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-bold text-white text-sm truncate">${campaign.name}</h3>
+                            <span class="${statusClass} px-2 py-1 rounded-full text-xs font-medium border">
+                                ${statusIcon} ${campaign.effective_status}
+                            </span>
+                        </div>
+                        
+                        <div class="space-y-2 text-sm">
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Daily Budget:</span>
+                                <span class="text-white font-medium">$${budget}</span>
+                            </div>
+                            
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Objective:</span>
+                                <span class="text-primary text-xs">${campaign.objective}</span>
+                            </div>
+                            
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Ads:</span>
+                                <span class="text-white">${campaign.ads_count}</span>
+                            </div>
+                            
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Impressions:</span>
+                                <span class="text-white">${(campaign.impressions || 0).toLocaleString()}</span>
+                            </div>
+                            
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Clicks:</span>
+                                <span class="text-white">${(campaign.clicks || 0).toLocaleString()}</span>
+                            </div>
+                            
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">CTR:</span>
+                                <span class="text-success">${ctr}%</span>
+                            </div>
+                            
+                            <div class="flex justify-between border-t border-dark-border pt-2 mt-2">
+                                <span class="text-gray-400">Spend:</span>
+                                <span class="text-warning font-medium">$${spend}</span>
+                            </div>
+                        </div>
+                        
+                        ${getWarningBadge(campaign)}
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Get warning badge for campaign issues
+        function getWarningBadge(campaign) {
+            const budget = campaign.goal_value / 100000000;
+            let warnings = [];
+            
+            if (budget >= 40) {
+                warnings.push('High Budget');
+            }
+            
+            if (campaign.effective_status === 'PAUSED' && campaign.spend > 0) {
+                warnings.push('Paused with Spend');
+            }
+            
+            // Check for duplicate budgets
+            const sameBudgetCampaigns = campaignsData.campaigns.filter(c => 
+                c.goal_value === campaign.goal_value && c.name !== campaign.name
+            );
+            if (sameBudgetCampaigns.length > 0) {
+                warnings.push('Duplicate Budget');
+            }
+            
+            if (warnings.length > 0) {
+                return `
+                    <div class="mt-3 pt-3 border-t border-dark-border">
+                        <div class="flex flex-wrap gap-1">
+                            ${warnings.map(warning => `
+                                <span class="bg-red-900/50 text-red-300 px-2 py-1 rounded text-xs border border-red-500/30">
+                                    ⚠️ ${warning}
+                                </span>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            return '';
+        }
+        
+        // Render campaign alerts
+        function renderCampaignAlerts() {
+            const alertsContainer = document.getElementById('alerts-container');
+            const alertsSection = document.getElementById('campaigns-alerts');
+            
+            let alerts = [];
+            
+            campaignsData.campaigns.forEach(campaign => {
+                const budget = campaign.goal_value / 100000000;
+                
+                if (budget >= 40) {
+                    alerts.push({
+                        type: 'warning',
+                        message: `"${campaign.name}" has a high daily budget of $${budget.toFixed(1)}`
+                    });
+                }
+                
+                if (campaign.effective_status === 'PAUSED' && campaign.spend > 0) {
+                    alerts.push({
+                        type: 'info',
+                        message: `"${campaign.name}" is paused but has active spend of $${(campaign.spend / 100000).toFixed(2)}`
+                    });
+                }
+            });
+            
+            // Check for duplicate budgets
+            const budgetGroups = {};
+            campaignsData.campaigns.forEach(campaign => {
+                const budget = campaign.goal_value;
+                if (!budgetGroups[budget]) budgetGroups[budget] = [];
+                budgetGroups[budget].push(campaign.name);
+            });
+            
+            Object.entries(budgetGroups).forEach(([budget, campaigns]) => {
+                if (campaigns.length > 1) {
+                    alerts.push({
+                        type: 'warning',
+                        message: `Duplicate budget detected: ${campaigns.join(', ')} all have $${(parseInt(budget) / 100000000).toFixed(1)} daily budget`
+                    });
+                }
+            });
+            
+            if (alerts.length > 0) {
+                alertsSection.classList.remove('hidden');
+                alertsContainer.innerHTML = alerts.map(alert => {
+                    const colorClass = alert.type === 'warning' ? 'border-warning text-warning' : 'border-primary text-primary';
+                    const icon = alert.type === 'warning' ? '⚠️' : 'ℹ️';
+                    
+                    return `
+                        <div class="border-l-4 ${colorClass} bg-gray-800/50 p-3 rounded-r">
+                            <p class="text-sm">
+                                <span class="mr-2">${icon}</span>
+                                ${alert.message}
+                            </p>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                alertsSection.classList.add('hidden');
+            }
+        }
+        
+        // Update campaigns timestamp
+        function updateCampaignsTimestamp() {
+            const now = new Date();
+            document.getElementById('campaigns-last-updated').textContent = 
+                `Last updated: ${now.toLocaleTimeString()}`;
+        }
+        
+        // Refresh campaigns data
+        async function refreshCampaigns() {
+            const refreshBtn = document.getElementById('refresh-campaigns');
+            refreshBtn.classList.add('animate-spin');
+            
+            try {
+                await loadCampaignsData();
+            } catch (error) {
+                console.error('Failed to refresh campaigns:', error);
+            } finally {
+                refreshBtn.classList.remove('animate-spin');
+            }
+        }
+        
+        // Initialize dashboard when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            initDashboard();
+            loadCampaignsData();
+        });
+
+        // Cleanup intervals on page unload
+        window.addEventListener('beforeunload', () => {
+            if (refreshInterval) clearInterval(refreshInterval);
+            if (countdownInterval) clearInterval(countdownInterval);
+        });
+
+        // Console easter egg
+        console.log(`
+        🏭 Factory Dashboard v1.0
+        ═══════════════════════════
+        Monitoring autonomous product validation pipeline
+        
+        Real-time metrics:
+        • Pain point discovery
+        • Product generation  
+        • Performance tracking
+        • Kill/scale decisions
+        
+        Built with ❤️ for builders who build builders
+        `);
+    </script>
+</body>
+</html>

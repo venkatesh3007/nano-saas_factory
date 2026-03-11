@@ -1,0 +1,30 @@
+{
+  "generated_at": "2026-03-10T17:44:58.234Z",
+  "total_count": 3,
+  "pain_points": [
+    {
+      "id": "entrepreneur_demo1",
+      "problem": "I wish there was a tool that automatically tracks my freelance expenses and categorizes them for taxes",
+      "score": 85,
+      "upvotes": 47,
+      "comments": 23,
+      "subreddit": "Entrepreneur"
+    },
+    {
+      "id": "productivity_demo2",
+      "problem": "Need a solution for managing multiple social media accounts without switching between apps",
+      "score": 92,
+      "upvotes": 156,
+      "comments": 45,
+      "subreddit": "productivity"
+    },
+    {
+      "id": "saas_demo3",
+      "problem": "Would pay for a tool that automatically generates professional invoices from project data",
+      "score": 78,
+      "upvotes": 89,
+      "comments": 34,
+      "subreddit": "SaaS"
+    }
+  ]
+}

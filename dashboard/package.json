@@ -1,0 +1,25 @@
+{
+  "name": "factory-dashboard",
+  "version": "1.0.0",
+  "description": "Factory Dashboard - Reddit Ads API Integration",
+  "main": "index.html",
+  "scripts": {
+    "dev": "netlify dev",
+    "build": "echo 'No build step required - static site'",
+    "deploy": "netlify deploy --prod",
+    "functions:dev": "netlify functions:serve",
+    "test": "echo \"No tests specified\" && exit 0"
+  },
+  "keywords": ["factory", "dashboard", "reddit-ads", "netlify"],
+  "author": "Backend Engineer",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.2"
+  },
+  "devDependencies": {
+    "netlify-cli": "^17.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,0 +1,43 @@
+[build]
+  # No build command - static site deployment
+  publish = "."
+  
+[functions]
+  # Netlify Functions configuration
+  directory = "netlify/functions"
+  
+[context.production.environment]
+  # Environment variables for production
+  NODE_ENV = "production"
+  
+[context.deploy-preview.environment]
+  # Environment variables for deploy previews
+  NODE_ENV = "preview"
+
+[[headers]]
+  # CORS headers for API endpoints
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Headers = "Content-Type, Authorization"
+    Access-Control-Allow-Methods = "GET, POST, OPTIONS"
+    
+[[headers]]
+  # Cache headers for static assets
+  for = "/*.(js|css|svg|woff|woff2)"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+    
+[[headers]]
+  # Security headers for HTML files
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    
+# No redirects needed - static site serves index.html directly
+
+# Environment variables documentation
+# REDDIT_TOKEN - Bearer token for Reddit Ads API authentication

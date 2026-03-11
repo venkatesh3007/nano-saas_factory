@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reddit Ads API Test - Factory Dashboard</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #ffffff;
+        }
+        .container {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+        h1 { color: #6366f1; }
+        h2 { color: #8b5cf6; border-bottom: 1px solid #444; padding-bottom: 10px; }
+        .status { padding: 10px; border-radius: 6px; margin: 10px 0; }
+        .status.loading { background: #1e40af; }
+        .status.success { background: #16a34a; }
+        .status.error { background: #dc2626; }
+        .data-section { margin: 20px 0; }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .summary-card {
+            background: #374151;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .summary-card h3 { margin: 0 0 10px 0; color: #60a5fa; }
+        .summary-card .number { font-size: 2rem; font-weight: bold; color: #10b981; }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        .data-table th, .data-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #444;
+        }
+        .data-table th { background: #374151; color: #60a5fa; }
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        .status-active { background: #16a34a; color: white; }
+        .status-paused { background: #f59e0b; color: white; }
+        .status-completed { background: #6b7280; color: white; }
+        button {
+            background: #6366f1;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+        button:hover { background: #5855f7; }
+        button:disabled { background: #6b7280; cursor: not-allowed; }
+        pre {
+            background: #111;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏭 Factory Dashboard - Reddit Ads API Integration</h1>
+        <p>Test the Reddit Ads API integration for live campaign data.</p>
+        
+        <button id="fetchBtn" onclick="fetchRedditAdsData()">Fetch Reddit Ads Data</button>
+        
+        <div id="status" class="status loading" style="display: none;">
+            Loading Reddit Ads data...
+        </div>
+    </div>
+
+    <div id="summaryContainer" class="container" style="display: none;">
+        <h2>📊 Campaign Summary</h2>
+        <div id="summaryGrid" class="summary-grid"></div>
+    </div>
+
+    <div id="campaignsContainer" class="container" style="display: none;">
+        <h2>🎯 Campaigns</h2>
+        <div id="campaignsTable"></div>
+    </div>
+
+    <div id="adGroupsContainer" class="container" style="display: none;">
+        <h2>📢 Ad Groups</h2>
+        <div id="adGroupsTable"></div>
+    </div>
+
+    <div id="adsContainer" class="container" style="display: none;">
+        <h2>📱 Ads</h2>
+        <div id="adsTable"></div>
+    </div>
+
+    <div id="rawDataContainer" class="container" style="display: none;">
+        <h2>🔍 Raw API Response</h2>
+        <pre id="rawData"></pre>
+    </div>
+
+    <script>
+        let currentData = null;
+
+        async function fetchRedditAdsData() {
+            const statusEl = document.getElementById('status');
+            const fetchBtn = document.getElementById('fetchBtn');
+            
+            // Show loading state
+            statusEl.style.display = 'block';
+            statusEl.className = 'status loading';
+            statusEl.textContent = 'Fetching Reddit Ads data...';
+            fetchBtn.disabled = true;
+
+            try {
+                // Call the Netlify function
+                const response = await fetch('/.netlify/functions/reddit-ads-status');
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.message || 'API request failed');
+                }
+
+                currentData = data;
+
+                // Show success status
+                statusEl.className = 'status success';
+                statusEl.textContent = `✅ Data loaded successfully! Last updated: ${new Date(data.meta.fetched_at).toLocaleString()}`;
+
+                // Display the data
+                displaySummary(data.data.summary);
+                displayCampaigns(data.data.campaigns);
+                displayAdGroups(data.data.ad_groups);
+                displayAds(data.data.ads);
+                displayRawData(data);
+
+                // Show containers
+                document.getElementById('summaryContainer').style.display = 'block';
+                document.getElementById('campaignsContainer').style.display = 'block';
+                document.getElementById('adGroupsContainer').style.display = 'block';
+                document.getElementById('adsContainer').style.display = 'block';
+                document.getElementById('rawDataContainer').style.display = 'block';
+
+            } catch (error) {
+                console.error('Error fetching Reddit Ads data:', error);
+                statusEl.className = 'status error';
+                statusEl.textContent = `❌ Error: ${error.message}`;
+            } finally {
+                fetchBtn.disabled = false;
+            }
+        }
+
+        function displaySummary(summary) {
+            const grid = document.getElementById('summaryGrid');
+            grid.innerHTML = `
+                <div class="summary-card">
+                    <h3>Campaigns</h3>
+                    <div class="number">${summary.campaigns.total}</div>
+                    <div>${summary.campaigns.active} active • ${summary.campaigns.paused} paused</div>
+                </div>
+                <div class="summary-card">
+                    <h3>Ad Groups</h3>
+                    <div class="number">${summary.ad_groups.total}</div>
+                    <div>${summary.ad_groups.active} active • ${summary.ad_groups.paused} paused</div>
+                </div>
+                <div class="summary-card">
+                    <h3>Ads</h3>
+                    <div class="number">${summary.ads.total}</div>
+                    <div>${summary.ads.active} active • ${summary.ads.paused} paused</div>
+                </div>
+                <div class="summary-card">
+                    <h3>Total Budget</h3>
+                    <div class="number">$${summary.budget.total_budget.toFixed(2)}</div>
+                    <div>Daily: $${summary.budget.daily_budget.toFixed(2)}</div>
+                </div>
+            `;
+        }
+
+        function displayCampaigns(campaigns) {
+            const container = document.getElementById('campaignsTable');
+            if (!campaigns.length) {
+                container.innerHTML = '<p>No campaigns found.</p>';
+                return;
+            }
+
+            container.innerHTML = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Status</th>
+                            <th>Budget</th>
+                            <th>Start Date</th>
+                            <th>End Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${campaigns.map(campaign => `
+                            <tr>
+                                <td>${campaign.name || campaign.id}</td>
+                                <td><span class="status-badge status-${getStatusClass(campaign.status)}">${campaign.status}</span></td>
+                                <td>$${(campaign.total_budget || 0).toFixed(2)}</td>
+                                <td>${formatDate(campaign.start_time)}</td>
+                                <td>${formatDate(campaign.end_time)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function displayAdGroups(adGroups) {
+            const container = document.getElementById('adGroupsTable');
+            if (!adGroups.length) {
+                container.innerHTML = '<p>No ad groups found.</p>';
+                return;
+            }
+
+            container.innerHTML = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Status</th>
+                            <th>Campaign</th>
+                            <th>Targeting</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${adGroups.map(adGroup => `
+                            <tr>
+                                <td>${adGroup.name || adGroup.id}</td>
+                                <td><span class="status-badge status-${getStatusClass(adGroup.status)}">${adGroup.status}</span></td>
+                                <td>${adGroup.campaign_id}</td>
+                                <td>${adGroup.targeting_type || 'N/A'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function displayAds(ads) {
+            const container = document.getElementById('adsTable');
+            if (!ads.length) {
+                container.innerHTML = '<p>No ads found.</p>';
+                return;
+            }
+
+            container.innerHTML = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Status</th>
+                            <th>Ad Group</th>
+                            <th>Creative Type</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${ads.map(ad => `
+                            <tr>
+                                <td>${ad.name || ad.id}</td>
+                                <td><span class="status-badge status-${getStatusClass(ad.status)}">${ad.status}</span></td>
+                                <td>${ad.ad_group_id}</td>
+                                <td>${ad.creative_type || 'N/A'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function displayRawData(data) {
+            const container = document.getElementById('rawData');
+            container.textContent = JSON.stringify(data, null, 2);
+        }
+
+        function getStatusClass(status) {
+            switch (status?.toLowerCase()) {
+                case 'active':
+                case 'running':
+                    return 'active';
+                case 'paused':
+                    return 'paused';
+                case 'completed':
+                case 'ended':
+                    return 'completed';
+                default:
+                    return 'paused';
+            }
+        }
+
+        function formatDate(dateString) {
+            if (!dateString) return 'N/A';
+            return new Date(dateString).toLocaleDateString();
+        }
+
+        // Auto-fetch on page load for demo
+        document.addEventListener('DOMContentLoaded', function() {
+            // Uncomment to auto-fetch on page load:
+            // fetchRedditAdsData();
+        });
+    </script>
+</body>
+</html>

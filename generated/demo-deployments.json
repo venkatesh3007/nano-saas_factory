@@ -1,0 +1,35 @@
+{
+  "deployed_at": "2026-03-10T17:44:58.246Z",
+  "deployments": [
+    {
+      "id": "product_demo_1",
+      "slug": "taxflow-pro",
+      "name": "TaxFlow Pro",
+      "live_url": "https://taxflow-pro-factory.netlify.app",
+      "checkout_url": "https://buy.stripe.com/test_taxflow-pro_1773164698246",
+      "polar_product_id": "polar_taxflow-pro",
+      "deployed_at": "2026-03-10T17:44:58.246Z",
+      "status": "live"
+    },
+    {
+      "id": "product_demo_2",
+      "slug": "social-commander",
+      "name": "Social Commander",
+      "live_url": "https://social-commander-factory.netlify.app",
+      "checkout_url": "https://buy.stripe.com/test_social-commander_1773164698246",
+      "polar_product_id": "polar_social-commander",
+      "deployed_at": "2026-03-10T17:44:58.246Z",
+      "status": "live"
+    },
+    {
+      "id": "product_demo_3",
+      "slug": "invoice-genie",
+      "name": "Invoice Genie",
+      "live_url": "https://invoice-genie-factory.netlify.app",
+      "checkout_url": "https://buy.stripe.com/test_invoice-genie_1773164698246",
+      "polar_product_id": "polar_invoice-genie",
+      "deployed_at": "2026-03-10T17:44:58.246Z",
+      "status": "live"
+    }
+  ]
+}
