@@ -1,347 +1,253 @@
 require('dotenv').config();
-const { Anthropic } = require('@anthropic-ai/sdk');
+const Anthropic = require('@anthropic-ai/sdk');
 const fs = require('fs-extra');
 const slugify = require('slugify');
 const path = require('path');
 
 class ProductBuilder {
   constructor() {
-    this.anthropic = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY,
-    });
-    
-    // Updated to use latest Claude model
+    this.anthropic = new Anthropic();
     this.model = 'claude-sonnet-4-20250514';
+    this.outputDir = process.env.OUTPUT_DIR || './generated';
   }
 
-  async buildProduct(painPoint, options = {}) {
-    console.log(`🏗️ Building functional product for: "${painPoint.title || painPoint.description?.substring(0, 80)}..."`);
+  async buildProduct(painPoint) {
+    const problem = typeof painPoint === 'string' ? painPoint : painPoint.problem;
+    const slug = slugify(problem, { lower: true, strict: true }).substring(0, 40);
+    const productDir = path.join(this.outputDir, slug);
 
-    try {
-      // Phase 1: Generate product concept
-      const productConcept = await this.generateProductConcept(painPoint);
-      console.log(`📝 Product concept: ${productConcept.name}`);
+    console.log(`\n🔧 Building: ${problem}`);
+    console.log(`   📁 Output: ${productDir}`);
 
-      // Phase 2: Generate working Netlify Function
-      const netlifyFunction = await this.generateNetlifyFunction(productConcept, painPoint);
-      console.log(`⚡ Generated Netlify Function (${netlifyFunction.length} chars)`);
+    await fs.ensureDir(productDir);
+    await fs.ensureDir(path.join(productDir, 'netlify', 'functions'));
 
-      // Phase 3: Generate functional HTML frontend
-      const htmlFrontend = await this.generateHtmlFrontend(productConcept, painPoint);
-      console.log(`🌐 Generated HTML frontend (${htmlFrontend.length} chars)`);
+    // Step 1: Generate the Netlify Function
+    console.log('   ⚙️  Generating Netlify Function...');
+    const functionCode = await this.generateFunction(problem);
+    await fs.writeFile(path.join(productDir, 'netlify', 'functions', 'process.js'), functionCode);
 
-      // Phase 4: Generate Netlify config
-      const netlifyConfig = this.generateNetlifyConfig(productConcept);
-      console.log(`⚙️ Generated netlify.toml`);
+    // Step 2: Generate the HTML frontend
+    console.log('   🎨 Generating frontend...');
+    const html = await this.generateFrontend(problem, slug);
+    await fs.writeFile(path.join(productDir, 'index.html'), html);
 
-      // Create product directory structure
-      const slug = slugify(productConcept.name, { lower: true, strict: true });
-      const outputDir = path.join(process.env.OUTPUT_DIR || './generated', slug);
-      
-      await fs.ensureDir(outputDir);
-      await fs.ensureDir(path.join(outputDir, 'netlify', 'functions'));
-
-      // Write files
-      await fs.writeFile(path.join(outputDir, 'index.html'), htmlFrontend);
-      await fs.writeFile(path.join(outputDir, 'netlify', 'functions', 'process.js'), netlifyFunction);
-      await fs.writeFile(path.join(outputDir, 'netlify.toml'), netlifyConfig);
-
-      // Save product metadata
-      const productData = {
-        id: `product_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-        slug: slug,
-        name: productConcept.name,
-        tagline: productConcept.tagline,
-        description: productConcept.description,
-        target_audience: productConcept.target_audience,
-        pricing: productConcept.pricing,
-        features: productConcept.features,
-        tool_type: productConcept.tool_type,
-        original_pain_point: painPoint,
-        generated_at: new Date().toISOString(),
-        output_dir: outputDir,
-        status: 'built'
-      };
-
-      await fs.writeFile(path.join(outputDir, 'product.json'), JSON.stringify(productData, null, 2));
-
-      // Validate the build
-      const validation = await this.validateBuild(outputDir);
-      console.log(`✅ Build validation: ${validation.valid ? 'PASSED' : 'FAILED'}`);
-      
-      if (!validation.valid) {
-        console.log('❌ Validation errors:', validation.errors);
-      }
-
-      return {
-        ...productData,
-        validation: validation
-      };
-
-    } catch (error) {
-      console.error('❌ Product build failed:', error.message);
-      throw error;
-    }
-  }
-
-  async generateProductConcept(painPoint) {
-    const prompt = `You're building a WORKING web tool to solve this problem: "${painPoint.description || painPoint.title}"
-
-    Create a product concept for a single-purpose tool that can be built with:
-    1. An HTML frontend (file upload OR text input form)
-    2. A Netlify Function that processes the input using Claude API or pure logic
-    3. Must be buildable in one sitting and actually functional
-
-    Examples of good tools:
-    - PDF to clean CSV converter (upload PDF → extract tables → return CSV)
-    - README to landing page generator (paste README → generate marketing page)
-    - Code to architecture diagram (paste code → generate visual diagram)
-    - Meeting notes to action items extractor
-    - Long article to tweet thread generator
-
-    Return ONLY JSON:
-    {
-      "name": "Tool Name (3-4 words max)",
-      "tagline": "One sentence value prop",
-      "description": "What it does and why developers/creators need it",
-      "target_audience": "Who needs this most",
-      "pricing": "Free with tip jar",
-      "features": ["3-4 key features"],
-      "tool_type": "converter|generator|analyzer|formatter",
-      "input_method": "file_upload|text_input|url_input",
-      "processing_approach": "claude_api|pure_logic|hybrid"
-    }`;
-
-    const response = await this.anthropic.messages.create({
-      model: this.model,
-      max_tokens: 1000,
-      messages: [{
-        role: 'user',
-        content: prompt
-      }]
-    });
-
-    // Clean up the response text to handle markdown code blocks
-    let responseText = response.content[0].text.trim();
-    
-    // Remove markdown code blocks if present
-    responseText = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '');
-    
-    // Try to parse as JSON
-    try {
-      return JSON.parse(responseText);
-    } catch (error) {
-      console.error('Failed to parse JSON response:', responseText.substring(0, 200));
-      throw new Error(`Invalid JSON response from Claude: ${error.message}`);
-    }
-  }
-
-  async generateNetlifyFunction(productConcept, painPoint) {
-    const prompt = `Generate a working Netlify Function for: "${productConcept.name}"
-
-    Requirements:
-    - Tool type: ${productConcept.tool_type}
-    - Input method: ${productConcept.input_method}
-    - Processing approach: ${productConcept.processing_approach}
-    - Must handle CORS properly
-    - Must process real input and return real output
-    - Use Anthropic Claude API if needed (ANTHROPIC_API_KEY env var available)
-
-    The function should:
-    1. Accept POST requests with ${productConcept.input_method === 'file_upload' ? 'file data (FormData)' : 'JSON body'}
-    2. Process the input ${productConcept.processing_approach === 'claude_api' ? 'using Claude API' : 'with pure JavaScript logic'}
-    3. Return processed result as JSON
-
-    Example input/output:
-    ${this.getExampleIO(productConcept)}
-
-    Return ONLY the complete JavaScript code for netlify/functions/process.js:`;
-
-    const response = await this.anthropic.messages.create({
-      model: this.model,
-      max_tokens: 2000,
-      messages: [{
-        role: 'user',
-        content: prompt
-      }]
-    });
-
-    // Clean up the response to remove markdown formatting
-    let code = response.content[0].text.trim();
-    code = code.replace(/```javascript\n?/g, '').replace(/```js\n?/g, '').replace(/```\n?/g, '');
-    return code;
-  }
-
-  async generateHtmlFrontend(productConcept, painPoint) {
-    const prompt = `Generate a complete HTML frontend for: "${productConcept.name}"
-
-    Requirements:
-    - Single HTML file with inline CSS and JavaScript
-    - ${productConcept.input_method === 'file_upload' ? 'File upload interface' : 'Text input form'}
-    - Calls /.netlify/functions/process for backend processing
-    - Shows loading state and results
-    - Professional design using Tailwind CSS (CDN)
-    - Mobile-responsive
-    - Include tip jar link: "Buy me a coffee ☕" → https://buymeacoffee.com/factory
-
-    Features to implement:
-    ${productConcept.features.map(f => `- ${f}`).join('\n    ')}
-
-    The interface should be clean, focused, and immediately usable.
-    
-    Return ONLY the complete HTML code:`;
-
-    const response = await this.anthropic.messages.create({
-      model: this.model,
-      max_tokens: 3000,
-      messages: [{
-        role: 'user',
-        content: prompt
-      }]
-    });
-
-    // Clean up the response to remove markdown formatting
-    let html = response.content[0].text.trim();
-    html = html.replace(/```html\n?/g, '').replace(/```\n?/g, '');
-    return html;
-  }
-
-  generateNetlifyConfig(productConcept) {
-    return `[build]
+    // Step 3: Generate netlify.toml
+    const netlifyToml = `[build]
   functions = "netlify/functions"
+  publish = "."
+
+[functions]
+  node_bundler = "esbuild"
 
 [[headers]]
   for = "/*"
   [headers.values]
-    X-Frame-Options = "DENY"
-    X-XSS-Protection = "1; mode=block"
-    X-Content-Type-Options = "nosniff"
-    Referrer-Policy = "strict-origin-when-cross-origin"
-
-[[headers]]
-  for = "/.netlify/functions/*"
-  [headers.values]
     Access-Control-Allow-Origin = "*"
-    Access-Control-Allow-Headers = "Content-Type"
     Access-Control-Allow-Methods = "GET, POST, OPTIONS"
-
-[functions]
-  node_bundler = "esbuild"
+    Access-Control-Allow-Headers = "Content-Type"
 `;
+    await fs.writeFile(path.join(productDir, 'netlify.toml'), netlifyToml);
+
+    // Step 4: Generate package.json for the functions
+    const funcPkg = {
+      name: slug,
+      version: '1.0.0',
+      dependencies: {
+        '@anthropic-ai/sdk': '^0.30.0'
+      }
+    };
+    await fs.writeJson(path.join(productDir, 'netlify', 'functions', 'package.json'), funcPkg, { spaces: 2 });
+
+    // Step 5: Product metadata
+    const product = {
+      id: `product_${Date.now()}`,
+      slug,
+      name: this.titleCase(problem),
+      problem,
+      category: painPoint.category || 'general',
+      built_at: new Date().toISOString(),
+      files: ['index.html', 'netlify.toml', 'netlify/functions/process.js'],
+      status: 'built'
+    };
+    await fs.writeJson(path.join(productDir, 'product.json'), product, { spaces: 2 });
+
+    // Step 6: Validate
+    const valid = await this.validate(productDir);
+    product.validated = valid;
+
+    console.log(`   ${valid ? '✅' : '⚠️'} Build ${valid ? 'validated' : 'has issues'}: ${slug}`);
+    return product;
   }
 
-  getExampleIO(productConcept) {
-    const examples = {
-      converter: `Input: PDF file with tables
-Output: { success: true, csv: "Name,Email,Phone\\nJohn,john@example.com,123..." }`,
-      
-      generator: `Input: { content: "My awesome project does X, Y, Z..." }
-Output: { success: true, result: "Generated landing page HTML..." }`,
-      
-      analyzer: `Input: { text: "Long meeting transcript..." }
-Output: { success: true, analysis: "Key points: 1. Decision made...", action_items: [...] }`,
-      
-      formatter: `Input: { code: "function messy() { return 'ugly code'; }" }
-Output: { success: true, formatted: "function clean() {\\n  return 'beautiful code';\\n}" }`
-    };
+  async generateFunction(problem) {
+    const message = await this.anthropic.messages.create({
+      model: this.model,
+      max_tokens: 4000,
+      messages: [{
+        role: 'user',
+        content: `Write a Netlify Function (Node.js) that solves this problem: "${problem}"
 
-    return examples[productConcept.tool_type] || examples.converter;
+Requirements:
+- Export a handler function compatible with Netlify Functions v2
+- Accept POST requests with JSON body containing an "input" field (string)
+- Process the input and return useful output
+- For AI-powered processing, use the @anthropic-ai/sdk package (already installed)
+- Read API key from process.env.ANTHROPIC_API_KEY
+- Handle errors gracefully with proper HTTP status codes
+- Handle OPTIONS requests for CORS
+- Return JSON with { success: true, output: "..." } or { success: false, error: "..." }
+
+If the problem can be solved with pure JavaScript (no AI needed), do it without the API call.
+If it requires AI (like "generate regex from description"), use Claude API.
+
+IMPORTANT: Keep the function UNDER 80 lines. Simple and focused. If the task can be done with pure JavaScript, do NOT use the AI SDK.
+
+Return ONLY the JavaScript code, no markdown fences, no explanation.`
+      }]
+    });
+
+    let code = message.content[0].text;
+    // Strip markdown fences if present
+    code = code.replace(/^```(?:javascript|js)?\n?/, '').replace(/\n?```$/, '').trim();
+    return code;
   }
 
-  async validateBuild(outputDir) {
-    const validation = {
-      valid: true,
-      errors: []
-    };
+  async generateFrontend(problem, slug) {
+    const title = this.titleCase(problem);
+    const message = await this.anthropic.messages.create({
+      model: this.model,
+      max_tokens: 4000,
+      messages: [{
+        role: 'user',
+        content: `Create a complete HTML page for a developer tool: "${problem}"
 
+Requirements:
+- Complete standalone HTML with embedded CSS and JS
+- Dark theme (#0a0a0a background, #e2e8f0 text, #6366f1 accent)
+- Clean modern design, good typography (system fonts)
+- A textarea input for the user to paste/type their input
+- A "Process" button that POSTs to /.netlify/functions/process with JSON body { input: "user input" }
+- A results area that shows the output (use a <pre> tag for code output)
+- Loading spinner/state while processing
+- Error handling (show errors in red)
+- Mobile responsive
+- Title: "${title}"
+- Subtitle: "Free developer tool — powered by AI"
+- Footer: "Built by NanoSaaS Factory 🏭"
+
+Return ONLY the HTML code, no markdown fences.`
+      }]
+    });
+
+    let html = message.content[0].text;
+    html = html.replace(/^```html?\n?/, '').replace(/\n?```$/, '').trim();
+    return html;
+  }
+
+  async validate(productDir) {
+    const requiredFiles = [
+      'index.html',
+      'netlify.toml',
+      'netlify/functions/process.js',
+      'product.json'
+    ];
+
+    for (const file of requiredFiles) {
+      const exists = await fs.pathExists(path.join(productDir, file));
+      if (!exists) {
+        console.log(`   ❌ Missing: ${file}`);
+        return false;
+      }
+    }
+
+    // Syntax check the function
+    const funcPath = path.join(productDir, 'netlify/functions/process.js');
     try {
-      // Check required files exist
-      const requiredFiles = [
-        'index.html',
-        'netlify/functions/process.js',
-        'netlify.toml',
-        'product.json'
-      ];
-
-      for (const file of requiredFiles) {
-        const filePath = path.join(outputDir, file);
-        if (!await fs.pathExists(filePath)) {
-          validation.valid = false;
-          validation.errors.push(`Missing file: ${file}`);
-        }
-      }
-
-      // Validate HTML
-      const htmlPath = path.join(outputDir, 'index.html');
-      if (await fs.pathExists(htmlPath)) {
-        const html = await fs.readFile(htmlPath, 'utf8');
-        if (!html.includes('<!DOCTYPE html>')) {
-          validation.valid = false;
-          validation.errors.push('HTML missing DOCTYPE declaration');
-        }
-        if (!html.includes('netlify/functions/process')) {
-          validation.valid = false;
-          validation.errors.push('HTML not calling Netlify Function');
-        }
-      }
-
-      // Validate Netlify Function
-      const functionPath = path.join(outputDir, 'netlify/functions/process.js');
-      if (await fs.pathExists(functionPath)) {
-        const functionCode = await fs.readFile(functionPath, 'utf8');
-        if (!functionCode.includes('exports.handler') && !functionCode.includes('export')) {
-          validation.valid = false;
-          validation.errors.push('Netlify Function missing proper export');
-        }
-      }
-
-      // Validate product.json
-      const productPath = path.join(outputDir, 'product.json');
-      if (await fs.pathExists(productPath)) {
-        try {
-          const product = JSON.parse(await fs.readFile(productPath, 'utf8'));
-          if (!product.name || !product.slug) {
-            validation.valid = false;
-            validation.errors.push('product.json missing required fields');
-          }
-        } catch (e) {
-          validation.valid = false;
-          validation.errors.push('product.json is not valid JSON');
-        }
-      }
-
-    } catch (error) {
-      validation.valid = false;
-      validation.errors.push(`Validation error: ${error.message}`);
+      const { execSync } = require('child_process');
+      execSync(`node -c "${funcPath}"`, { encoding: 'utf8', stdio: 'pipe' });
+    } catch (err) {
+      console.log(`   ❌ Function syntax error: ${(err.stderr || err.message).split('\n')[0]}`);
+      return false;
     }
 
-    return validation;
+    // Check function has an export
+    const funcCode = await fs.readFile(funcPath, 'utf8');
+    if (!funcCode.includes('export') && !funcCode.includes('module.exports') && !funcCode.includes('handler')) {
+      console.log('   ❌ Function missing handler export');
+      return false;
+    }
+
+    // Check HTML has form elements
+    const html = await fs.readFile(path.join(productDir, 'index.html'), 'utf8');
+    if (!html.includes('textarea') && !html.includes('input')) {
+      console.log('   ❌ HTML missing input elements');
+      return false;
+    }
+
+    return true;
   }
 
-  async listBuiltProducts() {
-    const outputDir = process.env.OUTPUT_DIR || './generated';
-    
-    if (!await fs.pathExists(outputDir)) {
-      return [];
-    }
+  async buildBatch(painPoints) {
+    console.log(`\n🏭 Building ${painPoints.length} products...`);
+    await fs.ensureDir(this.outputDir);
 
-    const products = [];
-    const dirs = await fs.readdir(outputDir);
+    const results = { products: [], errors: [], started_at: new Date().toISOString() };
 
-    for (const dir of dirs) {
-      const productPath = path.join(outputDir, dir, 'product.json');
-      if (await fs.pathExists(productPath)) {
-        try {
-          const product = JSON.parse(await fs.readFile(productPath, 'utf8'));
-          products.push(product);
-        } catch (error) {
-          console.warn(`Warning: Could not read product.json for ${dir}`);
-        }
+    for (let i = 0; i < painPoints.length; i++) {
+      const pp = painPoints[i];
+      console.log(`\n[${i + 1}/${painPoints.length}]`);
+
+      try {
+        const product = await this.buildProduct(pp);
+        results.products.push(product);
+      } catch (err) {
+        console.error(`   ❌ Failed: ${err.message}`);
+        results.errors.push({ pain_point: pp, error: err.message });
+      }
+
+      // Rate limit between builds
+      if (i < painPoints.length - 1) {
+        await new Promise(r => setTimeout(r, 2000));
       }
     }
 
-    return products.sort((a, b) => new Date(b.generated_at) - new Date(a.generated_at));
+    results.completed_at = new Date().toISOString();
+    results.total = painPoints.length;
+    results.successful = results.products.length;
+    results.failed = results.errors.length;
+
+    const batchPath = path.join(this.outputDir, 'batch-results.json');
+    await fs.writeJson(batchPath, results, { spaces: 2 });
+
+    console.log(`\n🎉 Build complete: ${results.successful}/${results.total} products built`);
+    return results;
   }
+
+  titleCase(str) {
+    return str.replace(/\b\w/g, c => c.toUpperCase());
+  }
+}
+
+if (require.main === module) {
+  (async () => {
+    const builder = new ProductBuilder();
+    const arg = process.argv[2];
+
+    if (!arg) {
+      console.log('Usage: node builder.js "problem description"');
+      console.log('   or: node builder.js pain-points.json');
+      process.exit(1);
+    }
+
+    if (arg.endsWith('.json')) {
+      const data = await fs.readJson(arg);
+      const painPoints = data.pain_points || data;
+      await builder.buildBatch(painPoints);
+    } else {
+      await builder.buildProduct(arg);
+    }
+  })().catch(err => { console.error('❌', err.message); process.exit(1); });
 }
 
 module.exports = { ProductBuilder };
