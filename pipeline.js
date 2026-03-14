@@ -3,15 +3,20 @@
 require('dotenv').config();
 const yargs = require('yargs');
 const fs = require('fs-extra');
+const path = require('path');
 const { RedditScout } = require('./modules/scout');
-const { ProductGenerator } = require('./modules/generator');
+const { ProductBuilder } = require('./modules/builder');
 const { ProductDeployer } = require('./modules/deployer');
+const { ProductMetrics } = require('./modules/metrics');
+const { ProductDecider } = require('./modules/decider');
 
 class FactoryPipeline {
   constructor() {
     this.scout = new RedditScout();
-    this.generator = new ProductGenerator();
+    this.builder = new ProductBuilder();
     this.deployer = new ProductDeployer();
+    this.metrics = new ProductMetrics();
+    this.decider = new ProductDecider();
     
     this.outputDir = process.env.OUTPUT_DIR || './generated';
     this.deployDir = process.env.DEPLOY_DIR || './deployed';
@@ -70,49 +75,97 @@ class FactoryPipeline {
         throw scoutError;
       }
 
-      // Phase 2: Generate products
-      console.log('\n🎨 PHASE 2: Generating products with AI...');
-      const generateStart = Date.now();
+      // Phase 2: Build functional products
+      console.log('\n🏗️ PHASE 2: Building functional products with Netlify Functions...');
+      const buildStart = Date.now();
       
       try {
-        const generationResult = await this.generator.generateBatch(results.pain_points, this.outputDir);
-        results.products = generationResult.products;
-        results.phases.generate = {
+        const builtProducts = [];
+        const buildErrors = [];
+
+        for (let i = 0; i < results.pain_points.length; i++) {
+          const painPoint = results.pain_points[i];
+          console.log(`\n[${i + 1}/${results.pain_points.length}] Building product for: ${painPoint.problem?.substring(0, 60)}...`);
+
+          try {
+            const product = await this.builder.buildProduct(painPoint);
+            builtProducts.push(product);
+            console.log(`✅ Built: ${product.name} → ${product.slug}`);
+          } catch (error) {
+            console.error(`❌ Build failed: ${error.message}`);
+            buildErrors.push({
+              pain_point: painPoint,
+              error: error.message
+            });
+          }
+        }
+
+        results.products = builtProducts;
+        results.phases.build = {
           status: 'completed',
-          duration_ms: Date.now() - generateStart,
-          attempted: generationResult.total_attempted,
-          successful: generationResult.successful,
-          failed: generationResult.failed
+          duration_ms: Date.now() - buildStart,
+          attempted: results.pain_points.length,
+          successful: builtProducts.length,
+          failed: buildErrors.length,
+          errors: buildErrors
         };
         
-        console.log(`✅ Generation phase complete: ${results.products.length} products created`);
+        console.log(`✅ Build phase complete: ${builtProducts.length} functional products created`);
         
-      } catch (generateError) {
-        results.phases.generate = {
+      } catch (buildError) {
+        results.phases.build = {
           status: 'failed',
-          duration_ms: Date.now() - generateStart,
-          error: generateError.message
+          duration_ms: Date.now() - buildStart,
+          error: buildError.message
         };
-        throw generateError;
+        throw buildError;
       }
 
       // Phase 3: Deploy products (optional)
       if (!options.skipDeploy && results.products.length > 0) {
-        console.log('\n🚀 PHASE 3: Deploying products...');
+        console.log('\n🚀 PHASE 3: Deploying products to Netlify...');
         const deployStart = Date.now();
         
         try {
-          const deploymentResult = await this.deployer.deployBatch(results.products);
-          results.deployments = deploymentResult.deployments;
+          const deployments = [];
+          const deployErrors = [];
+
+          for (let i = 0; i < results.products.length; i++) {
+            const product = results.products[i];
+            console.log(`\n[${i + 1}/${results.products.length}] Deploying: ${product.name}`);
+
+            try {
+              const deployment = await this.deployer.deployProduct(product);
+              deployments.push(deployment);
+              
+              // Track deployment in metrics
+              await this.metrics.trackDeployment(product.slug, deployment);
+              
+              console.log(`✅ Deployed: ${deployment.live_url}`);
+              
+              // Rate limiting
+              await this.sleep(2000);
+              
+            } catch (error) {
+              console.error(`❌ Deployment failed: ${error.message}`);
+              deployErrors.push({
+                product_slug: product.slug,
+                error: error.message
+              });
+            }
+          }
+
+          results.deployments = deployments;
           results.phases.deploy = {
             status: 'completed',
             duration_ms: Date.now() - deployStart,
-            attempted: deploymentResult.total_attempted,
-            successful: deploymentResult.successful,
-            failed: deploymentResult.failed
+            attempted: results.products.length,
+            successful: deployments.length,
+            failed: deployErrors.length,
+            errors: deployErrors
           };
           
-          console.log(`✅ Deployment phase complete: ${results.deployments.length} products deployed`);
+          console.log(`✅ Deployment phase complete: ${deployments.length} products live`);
           
         } catch (deployError) {
           results.phases.deploy = {
@@ -202,18 +255,71 @@ class FactoryPipeline {
     return painPoints;
   }
 
-  async runGenerateOnly(inputFile) {
-    console.log(`🎨 Generate mode: Processing ${inputFile}`);
-    const data = await fs.readJson(inputFile);
-    const painPoints = data.pain_points || data;
-    return await this.generator.generateBatch(painPoints);
+  async runBuildOnly(inputFile) {
+    console.log(`🏗️ Build mode: Processing ${inputFile}`);
+    
+    try {
+      let painPoints;
+      
+      if (inputFile.endsWith('.json')) {
+        const data = await fs.readJson(inputFile);
+        painPoints = data.pain_points || data;
+      } else {
+        painPoints = JSON.parse(inputFile);
+      }
+
+      const builtProducts = [];
+      
+      for (let i = 0; i < painPoints.length; i++) {
+        const painPoint = painPoints[i];
+        console.log(`\n[${i + 1}/${painPoints.length}] Building: ${painPoint.problem?.substring(0, 60)}...`);
+        
+        try {
+          const product = await this.builder.buildProduct(painPoint);
+          builtProducts.push(product);
+          console.log(`✅ Built: ${product.name}`);
+        } catch (error) {
+          console.error(`❌ Build failed: ${error.message}`);
+        }
+      }
+
+      console.log(`\n🎉 Build complete: ${builtProducts.length} products built`);
+      return builtProducts;
+      
+    } catch (error) {
+      console.error('❌ Build process failed:', error.message);
+      throw error;
+    }
   }
 
-  async runDeployOnly(inputFile) {
-    console.log(`🚀 Deploy mode: Processing ${inputFile}`);
-    const data = await fs.readJson(inputFile);
-    const products = data.products || [data];
-    return await this.deployer.deployBatch(products);
+  async runDeploySpecific(slug) {
+    console.log(`🚀 Deploy mode: Deploying ${slug}`);
+    
+    try {
+      // Find the built product
+      const productPath = path.join(this.outputDir, slug, 'product.json');
+      
+      if (!await fs.pathExists(productPath)) {
+        throw new Error(`Product not found: ${slug}. Run build first.`);
+      }
+
+      const productData = await fs.readJson(productPath);
+      
+      console.log(`📦 Found product: ${productData.name}`);
+      
+      const deployment = await this.deployer.deployProduct(productData);
+      
+      // Track deployment
+      await this.metrics.trackDeployment(slug, deployment);
+      
+      console.log(`✅ Deployed: ${deployment.live_url}`);
+      
+      return deployment;
+      
+    } catch (error) {
+      console.error('❌ Deployment failed:', error.message);
+      throw error;
+    }
   }
 
   async listResults() {
@@ -238,6 +344,10 @@ class FactoryPipeline {
         console.log(`  ${i + 1}. ${dep.name} - ${dep.live_url}`);
       });
     }
+  }
+
+  async sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
 
@@ -292,8 +402,8 @@ const cli = yargs
     }
   )
   .command(
-    'generate <input>',
-    'Generate products from pain points file',
+    'build <input>',
+    'Build products from pain points file',
     (yargs) => {
       return yargs.positional('input', {
         describe: 'Pain points JSON file',
@@ -303,30 +413,80 @@ const cli = yargs
     async (argv) => {
       const factory = new FactoryPipeline();
       try {
-        await factory.runGenerateOnly(argv.input);
+        await factory.runBuildOnly(argv.input);
       } catch (error) {
-        console.error('❌ Generation failed:', error.message);
+        console.error('❌ Build failed:', error.message);
         process.exit(1);
       }
     }
   )
   .command(
-    'deploy <input>',
-    'Deploy products from generated products file',
+    'deploy <slug>',
+    'Deploy a specific built product',
     (yargs) => {
-      return yargs.positional('input', {
-        describe: 'Generated products JSON file',
+      return yargs.positional('slug', {
+        describe: 'Product slug to deploy',
         type: 'string'
       });
     },
     async (argv) => {
       const factory = new FactoryPipeline();
       try {
-        await factory.runDeployOnly(argv.input);
+        await factory.runDeploySpecific(argv.slug);
       } catch (error) {
         console.error('❌ Deployment failed:', error.message);
         process.exit(1);
       }
+    }
+  )
+  .command(
+    'metrics',
+    'Show metrics dashboard for all products',
+    {},
+    async (argv) => {
+      const factory = new FactoryPipeline();
+      await factory.metrics.displayMetricsTable();
+    }
+  )
+  .command(
+    'decide',
+    'Run decision engine for scale/kill recommendations',
+    {},
+    async (argv) => {
+      const factory = new FactoryPipeline();
+      await factory.decider.makeDecisions();
+    }
+  )
+  .command(
+    'keep <slug>',
+    'Mark a product to keep permanently',
+    (yargs) => {
+      return yargs.positional('slug', {
+        describe: 'Product slug to keep',
+        type: 'string'
+      });
+    },
+    async (argv) => {
+      const factory = new FactoryPipeline();
+      await factory.decider.executeKeepDecision(argv.slug);
+    }
+  )
+  .command(
+    'kill <slug>',
+    'Kill a product deployment',
+    (yargs) => {
+      return yargs.positional('slug', {
+        describe: 'Product slug to kill',
+        type: 'string'
+      }).option('confirm', {
+        type: 'boolean',
+        default: false,
+        describe: 'Confirm the kill action'
+      });
+    },
+    async (argv) => {
+      const factory = new FactoryPipeline();
+      await factory.decider.executeKillDecision(argv.slug, argv.confirm);
     }
   )
   .command(

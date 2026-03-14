@@ -1,0 +1,86 @@
+{
+  "generated_at": "2026-03-14T13:06:33.758Z",
+  "rules_used": {
+    "kill_age_days": 7,
+    "keep_min_traffic": 100,
+    "keep_min_engagement": 5,
+    "scale_traffic_threshold": 1000,
+    "scale_engagement_threshold": 50,
+    "grace_period_days": 3
+  },
+  "decisions": {
+    "kill": [],
+    "keep": [],
+    "scale": [],
+    "no_action": [
+      {
+        "slug": "code-to-docs",
+        "reason": "Grace period (0/3 days)",
+        "confidence": 100,
+        "data": {
+          "days_live": 0,
+          "page_views": 0,
+          "function_calls": 0,
+          "keep_flag": false,
+          "status": "live"
+        },
+        "product": {
+          "slug": "code-to-docs",
+          "deployed_at": "2026-03-14T13:06:01.371Z",
+          "status": "live",
+          "deployment_url": null,
+          "deployment_id": "product_1773493541730_migyzd",
+          "site_id": "factory-code-to-docs-542950",
+          "days_live": 0,
+          "manual_keep_flag": false,
+          "traffic_data": {
+            "page_views": 0,
+            "unique_visitors": 0,
+            "last_visit": null
+          },
+          "performance_data": {
+            "build_time_ms": 19628,
+            "bundle_size_kb": null,
+            "lighthouse_score": null
+          },
+          "engagement_data": {
+            "tip_jar_clicks": 0,
+            "function_calls": 0,
+            "error_rate": 0,
+            "avg_response_time_ms": null
+          },
+          "metadata": {
+            "created_from": {
+              "id": "curated_1773493490736_gpah2",
+              "problem": "Writing API docs is tedious. Tools exist but they're complex. Need simple: paste code, get clean docs.",
+              "title": "Generate API documentation from code comments",
+              "description": "Writing API docs is tedious. Tools exist but they're complex. Need simple: paste code, get clean docs.",
+              "original_title": "Generate API documentation from code comments",
+              "original_text": "Writing API docs is tedious. Tools exist but they're complex. Need simple: paste code, get clean docs.",
+              "subreddit": "programming",
+              "pattern_matched": "curated",
+              "score": 80,
+              "upvotes": 64,
+              "comments": 24,
+              "upvote_ratio": 0.889142087675662,
+              "age_days": 17,
+              "url": "https://reddit.com/r/programming",
+              "extracted_at": "2026-03-14T13:04:50.736Z",
+              "source": "curated"
+            },
+            "deployment_method": "netlify",
+            "last_updated": "2026-03-14T13:06:01.371Z"
+          }
+        }
+      }
+    ],
+    "total": 1
+  },
+  "summary": {
+    "total_products": 1,
+    "kill_count": 0,
+    "keep_count": 0,
+    "scale_count": 0,
+    "no_action_count": 1
+  }
+}

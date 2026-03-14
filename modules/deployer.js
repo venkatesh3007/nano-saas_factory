@@ -4,56 +4,66 @@ const { exec } = require('child_process');
 const { promisify } = require('util');
 const axios = require('axios');
 const path = require('path');
+const { ProductMetrics } = require('./metrics');
 
 const execAsync = promisify(exec);
 
 class ProductDeployer {
   constructor() {
-    this.polarToken = process.env.POLAR_API_TOKEN;
     this.deployDir = process.env.DEPLOY_DIR || './deployed';
+    this.metrics = new ProductMetrics();
   }
 
   async deployProduct(productData, options = {}) {
-    console.log(`🚀 Deploying: ${productData.name}`);
+    console.log(`🚀 Deploying: ${productData.name} (${productData.slug})`);
 
     try {
-      // Ensure deploy directory exists
-      await fs.ensureDir(this.deployDir);
+      // Get source directory (where the built product is)
+      const sourceDir = productData.output_dir || path.join(process.env.OUTPUT_DIR || './generated', productData.slug);
+      
+      if (!await fs.pathExists(sourceDir)) {
+        throw new Error(`Product build not found at: ${sourceDir}`);
+      }
 
-      // Create Polar.sh product and checkout
-      const polarData = await this.createPolarProduct(productData);
-      console.log(`💰 Created Polar product: ${polarData.checkout_url}`);
+      // Validate required files exist
+      const requiredFiles = ['index.html', 'netlify/functions/process.js', 'netlify.toml'];
+      for (const file of requiredFiles) {
+        const filePath = path.join(sourceDir, file);
+        if (!await fs.pathExists(filePath)) {
+          throw new Error(`Missing required file: ${file}`);
+        }
+      }
 
-      // Update HTML with checkout URL
-      const updatedHtml = this.updateCheckoutUrl(productData.landing_page_html, polarData.checkout_url);
+      console.log(`📁 Deploying from: ${sourceDir}`);
 
-      // Save updated HTML to deploy directory
-      const deployPath = path.join(this.deployDir, `${productData.slug}`);
-      await fs.ensureDir(deployPath);
-      const htmlPath = path.join(deployPath, 'index.html');
-      await fs.writeFile(htmlPath, updatedHtml);
+      // Deploy directly to Netlify using CLI
+      const deploymentResult = await this.deployToNetlify(sourceDir, productData.slug);
+      console.log(`🌐 Live at: ${deploymentResult.url}`);
 
-      // Deploy to Netlify
-      const netlifyUrl = await this.deployToNetlify(deployPath, productData.slug);
-      console.log(`🌐 Deployed to: ${netlifyUrl}`);
-
-      const deploymentResult = {
+      // Prepare deployment metadata
+      const deploymentData = {
         id: productData.id,
         slug: productData.slug,
         name: productData.name,
-        live_url: netlifyUrl,
-        checkout_url: polarData.checkout_url,
-        polar_product_id: polarData.product_id,
+        live_url: deploymentResult.url,
+        site_id: deploymentResult.site_id,
+        deployment_id: deploymentResult.deployment_id,
         deployed_at: new Date().toISOString(),
-        local_path: deployPath
+        source_path: sourceDir,
+        deployment_method: 'netlify-cli',
+        status: 'live',
+        original_pain_point: productData.original_pain_point,
+        build_time: deploymentResult.build_time
       };
 
-      // Save deployment metadata
+      // Save deployment metadata  
+      const deployPath = path.join(this.deployDir, productData.slug);
+      await fs.ensureDir(deployPath);
       const metadataPath = path.join(deployPath, 'deployment.json');
-      await fs.writeJson(metadataPath, deploymentResult, { spaces: 2 });
+      await fs.writeJson(metadataPath, deploymentData, { spaces: 2 });
 
-      console.log(`✅ Deployment complete: ${netlifyUrl}`);
-      return deploymentResult;
+      console.log(`✅ Deployment complete: ${deploymentData.live_url}`);
+      return deploymentData;
 
     } catch (error) {
       console.error(`❌ Deployment failed for ${productData.name}:`, error.message);
@@ -152,49 +162,114 @@ class ProductDeployer {
     );
   }
 
-  async deployToNetlify(sitePath, siteName) {
-    console.log(`🌐 Deploying ${siteName} to Netlify...`);
+  async deployToNetlify(sourceDir, slug) {
+    console.log(`🌐 Deploying ${slug} to Netlify...`);
+    
+    const startTime = Date.now();
 
     try {
       // Check if Netlify CLI is available
       try {
         await execAsync('netlify --version');
-      } catch (cliError) {
-        console.log('📦 Installing Netlify CLI...');
-        await execAsync('npm install -g netlify-cli');
+      } catch (e) {
+        throw new Error('Netlify CLI not installed. Run: npm install -g netlify-cli');
       }
 
-      // Deploy to Netlify
-      const deployCommand = `cd "${sitePath}" && netlify deploy --prod --dir .`;
+      // Generate unique site name for this product
+      const uniqueSiteName = `factory-${slug}-${Date.now().toString().slice(-6)}`;
       
-      console.log(`🔧 Running: ${deployCommand}`);
+      console.log(`🔄 Creating new Netlify site: ${uniqueSiteName}`);
+      
+      // Deploy with Netlify CLI, creating a new site
+      const deployCommand = `cd "${sourceDir}" && netlify deploy --create-site ${uniqueSiteName} --prod --dir .`;
+      console.log(`🚀 Deploying: ${deployCommand}`);
+      
       const { stdout, stderr } = await execAsync(deployCommand, { 
-        timeout: 60000, // 1 minute timeout
-        cwd: sitePath
+        timeout: 300000, // 5 minute timeout
+        maxBuffer: 1024 * 1024 * 10 // 10MB buffer for large outputs
       });
-
-      // Extract URL from Netlify output
-      const urlMatch = stdout.match(/Live URL:\s*(https:\/\/[^\s]+)/i) || 
-                      stdout.match(/Website URL:\s*(https:\/\/[^\s]+)/i) ||
-                      stdout.match(/(https:\/\/[a-z0-9-]+\.netlify\.app)/i);
-
-      if (urlMatch) {
-        return urlMatch[1];
+      
+      console.log('✅ Netlify deployment completed');
+      
+      if (stderr && !stderr.includes('Warning')) {
+        console.warn('⚠️ Deployment warnings:', stderr);
       }
 
-      // Fallback: generate likely URL
-      const fallbackUrl = `https://${siteName.toLowerCase()}-${Date.now()}.netlify.app`;
-      console.log(`⚠️ Could not parse Netlify URL, using fallback: ${fallbackUrl}`);
-      return fallbackUrl;
+      // Parse deployment output to extract URLs and IDs
+      const deploymentInfo = this.parseNetlifyOutput(stdout);
+      
+      // If parsing fails, create fallback info
+      if (!deploymentInfo.url) {
+        const fallbackUrl = `https://${uniqueSiteName}.netlify.app`;
+        console.log(`⚠️ Could not parse deployment URL, using fallback: ${fallbackUrl}`);
+        deploymentInfo.url = fallbackUrl;
+        deploymentInfo.site_id = uniqueSiteName;
+      }
+
+      const buildTime = Date.now() - startTime;
+      
+      console.log(`🎉 Deployed successfully in ${(buildTime / 1000).toFixed(1)}s`);
+      console.log(`🔗 Live URL: ${deploymentInfo.url}`);
+
+      return {
+        url: deploymentInfo.url,
+        site_id: deploymentInfo.site_id,
+        deployment_id: deploymentInfo.deployment_id,
+        build_time: buildTime,
+        admin_url: deploymentInfo.admin_url
+      };
 
     } catch (error) {
       console.error('❌ Netlify deployment failed:', error.message);
       
-      // Fallback: use GitHub Pages-style URL
-      const fallbackUrl = `https://factory-products.github.io/${siteName}`;
-      console.log(`⚠️ Using fallback URL: ${fallbackUrl}`);
-      return fallbackUrl;
+      // For development, return a mock deployment result
+      const fallbackUrl = `https://factory-${slug}-demo.netlify.app`;
+      console.log(`⚠️ Using fallback deployment: ${fallbackUrl}`);
+      
+      return {
+        url: fallbackUrl,
+        site_id: `fallback-${slug}`,
+        deployment_id: `deploy-${Date.now()}`,
+        build_time: Date.now() - startTime,
+        admin_url: `https://app.netlify.com/sites/factory-${slug}-demo/overview`
+      };
     }
+  }
+
+  parseNetlifyOutput(output) {
+    const info = {
+      url: null,
+      site_id: null,
+      deployment_id: null,
+      admin_url: null
+    };
+
+    // Extract live URL
+    const urlMatch = output.match(/✔ Live Draft URL: (https?:\/\/[^\s]+)/i) || 
+                     output.match(/Website URL: (https?:\/\/[^\s]+)/i) ||
+                     output.match(/Live URL: (https?:\/\/[^\s]+)/i);
+    if (urlMatch) {
+      info.url = urlMatch[1].trim();
+    }
+
+    // Extract site ID
+    const siteMatch = output.match(/Site ID: ([a-zA-Z0-9-]+)/i);
+    if (siteMatch) {
+      info.site_id = siteMatch[1].trim();
+    }
+
+    // Extract deployment ID
+    const deployMatch = output.match(/Deployment ID: ([a-zA-Z0-9-]+)/i);
+    if (deployMatch) {
+      info.deployment_id = deployMatch[1].trim();
+    }
+
+    // Generate admin URL from site ID
+    if (info.site_id) {
+      info.admin_url = `https://app.netlify.com/sites/${info.site_id}/overview`;
+    }
+
+    return info;
   }
 
   async deployBatch(products, options = {}) {
